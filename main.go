@@ -2,23 +2,21 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm"
+	_ "github.com/jinzhu/gorm/dialects/postgres"
 )
 
-type Book struct {
-	ID     string  `json:"id"`
-	Title  string  `json:"title"`
-	Author *Author `json:"author"`
-}
-
-type Author struct {
-	Firstname string `json:"firstname"`
-	Lastname  string `json:"lastname"`
+type Event struct {
+	gorm.Model
+	Description string `json:"description"`
+	Priority    uint   `json:"priority"`
 }
 
 type Result struct {
@@ -26,78 +24,108 @@ type Result struct {
 	Description string `json:"description"`
 }
 
-var books []Book
+func getEventByPriority(w http.ResponseWriter, r *http.Request) {
+	DB, err := gorm.Open("postgres", "host=localhost port=5432 user=witcher dbname=witcher")
+	defer DB.Close()
 
-func getBooks(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(books)
-}
-
-func getBook(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
-	for _, item := range books {
-		if item.ID == params["id"] {
-			json.NewEncoder(w).Encode(item)
-			return
-		}
-	}
-	json.NewEncoder(w).Encode(&Book{})
-}
-
-func createBook(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	var book Book
-	err := json.NewDecoder(r.Body).Decode(&book)
-	if err == nil {
+	pr, err := strconv.Atoi(params["priority"])
+	if err != nil {
 		var result Result
 		result.Result = "not ok"
 		result.Description = "nil parameters"
 		json.NewEncoder(w).Encode(result)
 		return
 	}
-	book.ID = strconv.Itoa(rand.Intn(1000000))
-	books = append(books, book)
-	json.NewEncoder(w).Encode(book)
+	//var event Event
+	//DB.First(&event, "priority = ?", pr)
+	var events []Event
+	DB.Find(&events, "priority = ?", pr)
+	/*if event.ID == 0 {
+		var result Result
+		result.Result = "not ok"
+		result.Description = "nil parameters"
+		json.NewEncoder(w).Encode(result)
+		return
+	}*/
+	json.NewEncoder(w).Encode(&events)
 }
 
-func updateBook(w http.ResponseWriter, r *http.Request) {
+func getEventById(w http.ResponseWriter, r *http.Request) {
+	DB, err := gorm.Open("postgres", "host=localhost port=5432 user=witcher dbname=witcher")
+	defer DB.Close()
+
 	w.Header().Set("Content-Type", "application/json")
 	params := mux.Vars(r)
-	for index, item := range books {
-		if item.ID == params["id"] {
-			books = append(books[:index], books[index+1:]...)
-			var book Book
-			_ = json.NewDecoder(r.Body).Decode(&book)
-			book.ID = params["id"]
-			books = append(books, book)
-			json.NewEncoder(w).Encode(book)
-			return
-		}
+	id, err := strconv.Atoi(params["id"])
+	if err != nil {
+		var result Result
+		result.Result = "not ok!"
+		result.Description = "nil parameters"
+		json.NewEncoder(w).Encode(result)
+		return
 	}
-	json.NewEncoder(w).Encode(books)
+	var event Event
+	DB.First(&event, "id = ?", id)
+
+	if event.ID == 0 {
+		var result Result
+		result.Result = "not ok!!"
+		result.Description = "nil parameters"
+		json.NewEncoder(w).Encode(result)
+		return
+	}
+	json.NewEncoder(w).Encode(&event)
 }
 
-func deleteBook(w http.ResponseWriter, r *http.Request) {
+func createEvent(w http.ResponseWriter, r *http.Request) {
+	DB, _ := gorm.Open("postgres", "host=localhost port=5432 user=witcher dbname=witcher")
+	defer DB.Close()
+
 	w.Header().Set("Content-Type", "application/json")
-	params := mux.Vars(r)
-	for index, item := range books {
-		if item.ID == params["id"] {
-			books = append(books[:index], books[index+1:]...)
-			break
-		}
+	var event Event
+	err_ := json.NewDecoder(r.Body).Decode(&event)
+	if err_ != nil {
+		var result Result
+		result.Result = "not ok"
+		result.Description = "nil parameters"
+		json.NewEncoder(w).Encode(result)
+		return
 	}
-	json.NewEncoder(w).Encode(books)
+	DB.Create(&event)
+	json.NewEncoder(w).Encode(event)
 }
 
 func main() {
+	DB, err := gorm.Open("postgres", "host=localhost port=5432 user=witcher dbname=witcher")
+	defer DB.Close()
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	// Migrate the schema
+	DB.AutoMigrate(&Event{})
+
 	r := mux.NewRouter()
-	books = append(books, Book{ID: "1", Title: "Война и Мир", Author: &Author{Firstname: "Лев", Lastname: "Толстой"}})
-	books = append(books, Book{ID: "2", Title: "Преступление и наказание", Author: &Author{Firstname: "Фёдор", Lastname: "Достоевский"}})
-	r.HandleFunc("/books", getBooks).Methods("GET")
-	r.HandleFunc("/books/{id}", getBook).Methods("GET")
-	r.HandleFunc("/books", createBook).Methods("POST")
-	r.HandleFunc("/books/{id}", updateBook).Methods("PUT")
-	r.HandleFunc("/books/{id}", deleteBook).Methods("DELETE")
+	r.HandleFunc("/event/priority/{priority}", getEventByPriority).Methods("GET")
+	r.HandleFunc("/event/{id}", getEventById).Methods("GET")
+	r.HandleFunc("/event", createEvent).Methods("POST")
+
 	log.Fatal(http.ListenAndServe(":8000", r))
+	// Create
+	//db.Create(&Event{Description: "Broken lavochka", Priority: 1000})
+
+	// Read
+	//var product Event
+	//db.First(&product, 1)                   // find product with id 1
+	//db.First(&product, "description = ?", "Broken lavochka") // find product with code l1212
+
+	//fmt.Println(product)
+	// Update - update product's price to 2000
+	//db.Model(&product).Update("Price", 2000)
+
+	// Delete - delete product
+	//db.Delete(&product)
 }
